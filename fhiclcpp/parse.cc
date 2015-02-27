@@ -19,6 +19,7 @@
 #include "boost/spirit/include/phoenix_bind.hpp"
 #include "boost/spirit/include/phoenix_operator.hpp"
 #include "boost/spirit/include/qi.hpp"
+#include "boost/spirit/include/qi_no_skip.hpp"
 #include "boost/spirit/include/support_istream_iterator.hpp"
 #pragma GCC diagnostic ignored "-pedantic"
 #include "boost/spirit/repository/home/qi/primitive/iter_pos.hpp"
@@ -135,24 +136,22 @@ namespace {
   {
     throw fhicl::exception(fhicl::error::parse_error, "Local lookup error", e)
       << "at "
-      << s.whereis(pos)
-      << ".\n";
+      << s.highlighted_whereis(pos)
+      << "\n";
   }
 
   template <typename FwdIter>
   fhicl::extended_value
-  database_lookup(std::string const & name,
+  database_lookup(std::string const &,
                   fhicl::intermediate_table const &,
                   bool,
                   FwdIter pos,
                   cet::includer const & s)
   {
     throw fhicl::exception(fhicl::error::unimplemented, "Database lookup error")
-      << "@db::"
-      << name
-      << " at "
-      << s.whereis(pos)
-      << ": FHiCL-cpp database lookup not yet available.\n";
+      << "at "
+      << s.highlighted_whereis(pos)
+      << "\nFHiCL-cpp database lookup not yet available.\n";
   }
 
   void
@@ -195,8 +194,8 @@ namespace {
           << "key \""
           << name
           << "\" does not refer to a table at "
-          << s.whereis(pos)
-          << ".\n";
+          << s.highlighted_whereis(pos)
+          << "\n";
     }
     table_t const & incoming = boost::any_cast<table_t const &>(xval.value);
     for (auto i = incoming.cbegin(), e = incoming.cend(); i != e; ++i) {
@@ -222,8 +221,8 @@ namespace {
           << "key \""
           << name
           << "\" does not refer to a sequence at "
-          << s.whereis(pos)
-          << ".\n";
+          << s.highlighted_whereis(pos)
+          << "\n";
     }
     sequence_t const & incoming = boost::any_cast<sequence_t const &>(xval.value);
 #if 0 /* Compiler supports C++2011 signature for ranged vector::insert() */
@@ -313,7 +312,7 @@ struct fhicl::document_parser
   value_parser        vp;
 
   // parser rules:
-  atom_token      name, qualname, localref, dbref;
+  atom_token      name, qualname, noskip_qualname, localref, dbref;
   sequence_token  sequence;
   table_token     table;
   value_token     value;
@@ -370,7 +369,7 @@ fhicl::value_parser<FwdIter, Skip>::value_parser()
                  | (name >> (lit(':') > lit("@erase"))) [ phx::bind(map_erase, qi::_1, _val) ]
                 )
              > lit('}');
-  id    = lit("@id::") > fhicl::dbid [ _val = qi::_1 ];
+  id    = lit("@id::") > no_skip [ fhicl::dbid ] [ _val = qi::_1 ];
   value    = (nil      [ _val = phx::bind(xvalue, false, NIL     , qi::_1) ]
               | boolean  [ _val = phx::bind(xvalue, false, BOOL    , qi::_1) ]
               | number   [ _val = phx::bind(xvalue, false, NUMBER  , qi::_1) ]
@@ -409,16 +408,19 @@ fhicl::document_parser<FwdIter, Skip>::document_parser(cet::includer const & s)
   qualname = fhicl::ass                                  [ _val = qi::_1 ]
              >> *((char_('.') > fhicl::ass)               [ _val += qi::_1 + qi::_2 ]
                   | (char_('[') > fhicl::uint > char_(']')) [ _val += qi::_1 + qi::_2 + qi::_3]
-                 );  // TODO: only some whitespace permitted
-  // TODO: no whitespace permitted
-  localref = lit("@local::") > qualname [ _val = qi::_1 ];
-  dbref    = lit("@db::") > qualname [ _val = qi::_1 ];
+                 );  // Whitespace permitted before, and around delimiters ( '.', '[', ']').
+  noskip_qualname = no_skip [ fhicl::ass ]                [ _val = qi::_1 ]
+             >> *((char_('.') > fhicl::ass)               [ _val += qi::_1 + qi::_2 ]
+                  | (char_('[') > fhicl::uint > char_(']')) [ _val += qi::_1 + qi::_2 + qi::_3]
+                 );  // Whitespace permitted around delimiters ('.', '[', ']') only.
+  localref = lit("@local::") > noskip_qualname [ _val = qi::_1 ];
+  dbref    = lit("@db::") > noskip_qualname [ _val = qi::_1 ];
   // Can't use simple, "list context" due to the possibility of one of
   // the list elements actually returning multiple elements.
   sequence =
     lit('[')
-    > -(((value [ phx::bind(seq_insert_value, qi::_1, _val) ]) | (iter_pos >> lit("@sequence::") > qualname) [ phx::bind(&seq_insert_sequence<iter_t>, qi::_2, ref(tbl), ref(in_prolog), _val, qi::_1, s) ]))
-    > *(lit(',') > ((value [ phx::bind(seq_insert_value, qi::_1, _val) ]) | (iter_pos >> lit("@sequence::") > qualname) [ phx::bind(&seq_insert_sequence<iter_t>, qi::_2, ref(tbl), ref(in_prolog), _val, qi::_1, s) ]))
+    > -(((value [ phx::bind(seq_insert_value, qi::_1, _val) ]) | (iter_pos >> lit("@sequence::") > noskip_qualname) [ phx::bind(&seq_insert_sequence<iter_t>, qi::_2, ref(tbl), ref(in_prolog), _val, qi::_1, s) ]))
+    > *(lit(',') > ((value [ phx::bind(seq_insert_value, qi::_1, _val) ]) | (iter_pos >> lit("@sequence::") > noskip_qualname) [ phx::bind(&seq_insert_sequence<iter_t>, qi::_2, ref(tbl), ref(in_prolog), _val, qi::_1, s) ]))
     > lit(']');
   table =
     lit('{')
@@ -426,7 +428,7 @@ fhicl::document_parser<FwdIter, Skip>::document_parser(cet::includer const & s)
         ) [ phx::bind(map_insert, qi::_1, qi::_2, _val) ]
         | (name >> (lit(':') > lit("@erase"))
           ) [ phx::bind(map_erase, qi::_1, _val) ]
-        | (iter_pos >> lit("@table::") > qualname
+        | (iter_pos >> lit("@table::") > noskip_qualname
           ) [ phx::bind(&insert_table<table_t, iter_t>,
                         qi::_2, ref(tbl), ref(in_prolog), _val,
                         qi::_1, s) ]
@@ -455,7 +457,7 @@ fhicl::document_parser<FwdIter, Skip>::document_parser(cet::includer const & s)
     >> *((qualname
           >> (lit(':') > value)
          ) [ phx::bind(tbl_insert, qi::_1, qi::_2, ref(tbl)) ]
-         | (iter_pos >> lit("@table::") > qualname
+         | (iter_pos >> lit("@table::") > noskip_qualname
            ) [ phx::bind(&insert_table<fhicl::intermediate_table, iter_t>,
                          qi::_2, ref(tbl), ref(in_prolog), ref(tbl),
                          qi::_1, s) ]
@@ -466,7 +468,7 @@ fhicl::document_parser<FwdIter, Skip>::document_parser(cet::includer const & s)
                   ) [ phx::bind(tbl_insert, qi::_1, qi::_2, ref(tbl)) ]
                   | (qualname >> (lit(':') > lit("@erase"))
                     ) [ phx::bind(tbl_erase, qi::_1, ref(tbl)) ]
-                  | (iter_pos >> lit("@table::") > qualname
+                  | (iter_pos >> lit("@table::") > noskip_qualname
                     ) [ phx::bind(&insert_table<fhicl::intermediate_table, iter_t>,
                                   qi::_2, ref(tbl), ref(in_prolog), ref(tbl),
                                   qi::_1, s) ]
@@ -475,6 +477,7 @@ fhicl::document_parser<FwdIter, Skip>::document_parser(cet::includer const & s)
   localref.name("localref atom");
   dbref   .name("dbref atom");
   qualname.name("qualified name");
+  noskip_qualname.name("qualified name (no pre-skip)");
   sequence.name("sequence");
   table   .name("table");
   value   .name("value");
@@ -527,10 +530,7 @@ fhicl::parse_document(std::string const  &  filename
   iter_t const                  end  =  s.end();
   bool b = false;
   try {
-    b =  qi::phrase_parse(begin, end,
-                          p >> *whitespace,
-                          whitespace
-                         );
+    b =  qi::phrase_parse(begin, end, p, whitespace);
   }
   catch (qi::expectation_failure<iter_t> const & e) {
     begin = e.first;
@@ -540,8 +540,8 @@ fhicl::parse_document(std::string const  &  filename
   { result = p.tbl; }
   else
     throw fhicl::exception(fhicl::parse_error, "detected at or near")
-        << s.whereis(begin)
-        << ".\n";
+        << s.highlighted_whereis(begin)
+        << "\n";
 }  // parse_document()
 
 // ----------------------------------------------------------------------
@@ -563,10 +563,7 @@ fhicl::parse_document(std::istream     &    is
   iter_t const                  end  =  s.end();
   bool b = false;
   try {
-    b =  qi::phrase_parse(begin, end,
-                          p >> *whitespace,
-                          whitespace
-                         );
+    b =  qi::phrase_parse(begin, end, p, whitespace);
   }
   catch (qi::expectation_failure<iter_t> const & e) {
     begin = e.first;
@@ -576,8 +573,8 @@ fhicl::parse_document(std::istream     &    is
   { result = p.tbl; }
   else
     throw fhicl::exception(fhicl::parse_error, "detected at or near")
-        << s.whereis(begin)
-        << ".\n";
+        << s.highlighted_whereis(begin)
+        << "\n";
 }  // parse_document()
 
 // ======================================================================
