@@ -1,3 +1,6 @@
+if (ALT_CMAKE) 
+include(altCMakeLists.cmake)
+else()
 #
 #  fhiclcpp/CMakeLists.txt
 #  -------------------------------------------------------------------
@@ -52,3 +55,4 @@ add_subdirectory( test )
 
 # packaging utility
 include(UseCPack)
+endif()

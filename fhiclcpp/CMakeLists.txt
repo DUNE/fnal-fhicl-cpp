@@ -1,3 +1,6 @@
+if (ALT_CMAKE) 
+include(altCMakeLists.cmake)
+else()
 include(CetMake)
 
 add_subdirectory( detail )
@@ -28,3 +31,4 @@ cet_make_exec(fhicl-write-db
 
 install_headers()
 install_source()
+endif()

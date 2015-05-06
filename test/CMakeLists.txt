@@ -1,3 +1,6 @@
+if (ALT_CMAKE) 
+include(altCMakeLists.cmake)
+else()
 # ======================================================================
 #
 # Testing
@@ -113,4 +116,4 @@ cet_test(fhicl-write-db-test HANDBUILT
   DEPENDS WriteSQLiteDB_t
   PASS_REGULAR_EXPRESSION "^3\n$"
   )
-
+endif()
